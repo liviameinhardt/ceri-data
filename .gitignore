@@ -1,3 +1,13 @@
 cmip6/
 error_log.txt
 nohup.out
+ISA ENERGIA BRASIL.kmz
+__pycache__/
+cmip6_brazil/
+deslizamento/
+ensembles_daily/
+ensembles_monthly/
+figures.zip
+figures/
+topodata_zips/
+veg/
