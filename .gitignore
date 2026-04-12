@@ -11,3 +11,6 @@ figures.zip
 figures/
 topodata_zips/
 veg/
+.venv/
+.claude/
+data/

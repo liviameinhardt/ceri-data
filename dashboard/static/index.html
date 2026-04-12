@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISA Energia — Análise Climática CMIP6</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & base ───────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: #0d1117; color: #e6edf3;
+  font-family: 'Inter', sans-serif; font-size: 13px; }
+
+/* ── Loading screen ─────────────────────────────────────────────────────────── */
+#loading { position:fixed; inset:0; background:#0d1117; display:flex;
+  flex-direction:column; align-items:center; justify-content:center; z-index:9999; }
+.spinner { width:48px; height:48px; border:4px solid #21262d;
+  border-top-color:#E8540A; border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+#loading p { margin-top:16px; color:#8b949e; font-size:13px;
+  font-family:'IBM Plex Mono',monospace; }
+
+/* ── Layout ─────────────────────────────────────────────────────────────────── */
+#app { display:flex; flex-direction:column; height:100vh; }
+
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 20px; height:48px; background:#161b22;
+  border-bottom:1px solid #30363d; flex-shrink:0; z-index:10;
+}
+.header-title { font-size:14px; font-weight:700; color:#e6edf3; letter-spacing:.3px; }
+.header-sub { font-size:10px; color:rgba(255,255,255,.5);
+  font-family:'IBM Plex Mono',monospace; letter-spacing:.8px; margin-top:2px; }
+.header-badge { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.15);
+  border-radius:20px; padding:4px 14px; font-size:11px; color:rgba(255,255,255,.8);
+  font-family:'IBM Plex Mono',monospace; }
+
+.body-wrap { display:flex; flex:1; overflow:hidden; }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────────── */
+#sidebar { width:290px; background:#161b22; border-right:1px solid #30363d;
+  display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0; }
+
+.panel-section { padding:14px 16px; border-bottom:1px solid #21262d; }
+.panel-title { font-size:10px; font-weight:700; color:#8b949e;
+  text-transform:uppercase; letter-spacing:1.2px; margin-bottom:10px; }
+
+/* KPIs */
+.kpi-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.kpi-box { background:#0d1117; border:1px solid #21262d;
+  border-radius:6px; padding:10px 12px; }
+.kpi-val { font-size:22px; font-weight:700; color:#e6edf3; line-height:1;
+  font-family:'IBM Plex Mono',monospace; }
+.kpi-lbl { font-size:10px; color:#8b949e; margin-top:3px; }
+
+/* Voltage legend */
+.legend-item { display:flex; align-items:center; gap:8px; padding:5px 4px;
+  cursor:pointer; border-radius:4px; transition:background .15s; user-select:none; }
+.legend-item:hover { background:rgba(255,255,255,.05); }
+.legend-swatch { width:28px; height:4px; border-radius:2px; flex-shrink:0; }
+.legend-text { font-size:12px; color:#c9d1d9; flex:1; }
+.legend-count { font-size:10px; color:#8b949e; font-family:'IBM Plex Mono',monospace; }
+.legend-item.hidden .legend-text { color:#484f58; }
+.legend-item.hidden .legend-swatch { opacity:.2; }
+
+/* Filters */
+.filter-group { margin-bottom:10px; }
+.filter-label { font-size:11px; color:#8b949e; margin-bottom:4px; display:block; }
+select, .search-box {
+  width:100%; background:#0d1117; border:1px solid #30363d;
+  border-radius:6px; color:#e6edf3; padding:6px 9px; font-size:12px;
+  font-family:'Inter',sans-serif; outline:none; cursor:pointer;
+  appearance:none; -webkit-appearance:none;
+}
+select:focus, .search-box:focus { border-color:#E8540A; }
+.search-results { margin-top:6px; max-height:160px; overflow-y:auto; }
+.search-result-item { padding:5px 8px; font-size:11px; color:#c9d1d9; cursor:pointer;
+  border-radius:4px; border-bottom:1px solid #21262d;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.search-result-item:hover { background:rgba(232,84,10,.15); color:#E8540A; }
+
+/* Variable pills */
+.var-grid { display:flex; flex-wrap:wrap; gap:6px; }
+.var-pill { background:#0d1117; border:1px solid #30363d; border-radius:20px;
+  padding:5px 12px; font-size:11px; color:#8b949e; cursor:pointer;
+  transition:all .15s; font-family:'Inter',sans-serif; }
+.var-pill:hover { border-color:#E8540A; color:#E8540A; }
+.var-pill.active { background:rgba(232,84,10,.15); border-color:#E8540A; color:#E8540A;
+  font-weight:600; }
+
+/* Toggles */
+.toggle-row { display:flex; align-items:center; justify-content:space-between;
+  padding:4px 0; }
+.toggle-label { font-size:12px; color:#c9d1d9; }
+.toggle { position:relative; display:inline-block; width:36px; height:20px; }
+.toggle input { opacity:0; width:0; height:0; }
+.toggle-slider { position:absolute; cursor:pointer; inset:0;
+  background:#30363d; border-radius:10px; transition:.2s; }
+.toggle-slider:before { position:absolute; content:""; height:14px; width:14px;
+  left:3px; bottom:3px; background:white; border-radius:50%; transition:.2s; }
+input:checked + .toggle-slider { background:#E8540A; }
+input:checked + .toggle-slider:before { transform:translateX(16px); }
+
+/* Selected line info card */
+#line-card { display:none; }
+#line-card .card-title { font-size:13px; font-weight:700; color:#e6edf3;
+  margin-bottom:8px; line-height:1.4; }
+.card-row { display:flex; justify-content:space-between; margin-bottom:4px; }
+.card-key { font-size:11px; color:#8b949e; }
+.card-val { font-size:11px; color:#c9d1d9; font-weight:600; text-align:right; }
+.card-cells { display:inline-block; margin-top:6px; background:rgba(232,84,10,.12);
+  border:1px solid rgba(232,84,10,.3); border-radius:4px; padding:3px 8px;
+  font-size:11px; color:#E8540A; font-family:'IBM Plex Mono',monospace; }
+
+/* ── Main content ────────────────────────────────────────────────────────────── */
+#main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+
+/* Map container — shrinks when charts panel is open */
+#map-wrap { flex:1; position:relative; min-height:0;
+  transition:flex .35s ease; }
+#map { width:100%; height:100%; }
+
+/* Analysis panel */
+#analysis-wrap {
+  height:0; overflow:hidden;
+  transition:height .35s ease;
+  background:#0d1117; border-top:1px solid #30363d;
+  display:flex; flex-direction:column;
+}
+#analysis-wrap.open { height:42vh; }
+
+#analysis-header {
+  display:flex; align-items:center; gap:12px;
+  padding:10px 20px 0; flex-shrink:0;
+}
+#analysis-title { font-size:12px; font-weight:700; color:#8b949e;
+  text-transform:uppercase; letter-spacing:1px; }
+#analysis-line-name { font-size:13px; color:#e6edf3; font-weight:600; }
+#analysis-var-label { font-size:11px; color:#E8540A;
+  font-family:'IBM Plex Mono',monospace; }
+#close-analysis { margin-left:auto; background:none; border:none; color:#8b949e;
+  cursor:pointer; font-size:18px; line-height:1; padding:2px 6px; }
+#close-analysis:hover { color:#e6edf3; }
+
+#charts-grid {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:8px; padding:8px 16px 12px;
+  flex:1; min-height:0; overflow:hidden;
+}
+.chart-cell { display:flex; flex-direction:column; min-height:0; }
+.chart-scenario-label { font-size:10px; font-weight:700; color:#8b949e;
+  text-transform:uppercase; letter-spacing:.8px; margin-bottom:4px; padding-left:4px; }
+.chart-box { flex:1; min-height:0; border-radius:6px; overflow:hidden;
+  background:#161b22; border:1px solid #21262d; }
+
+/* Loading indicator */
+#analysis-loading { display:none; position:absolute; inset:0;
+  background:rgba(13,17,23,.85); align-items:center; justify-content:center;
+  z-index:500; border-radius:6px; }
+#analysis-loading span { color:#8b949e; font-family:'IBM Plex Mono',monospace; font-size:12px; }
+
+/* Leaflet overrides */
+.leaflet-popup-content-wrapper { background:#161b22 !important;
+  border:1px solid #30363d !important; border-radius:8px !important;
+  box-shadow:0 8px 24px rgba(0,0,0,.5) !important; }
+.leaflet-popup-tip { background:#161b22 !important; }
+.leaflet-popup-content { color:#e6edf3 !important; font-family:'Inter',sans-serif;
+  min-width:200px; margin:12px 16px; }
+.popup-title { font-size:13px; font-weight:700; color:#e6edf3;
+  margin-bottom:8px; line-height:1.4; }
+.popup-row { display:flex; justify-content:space-between; gap:12px; margin-bottom:4px; }
+.popup-key { font-size:11px; color:#8b949e; }
+.popup-val { font-size:11px; color:#c9d1d9; font-weight:600; text-align:right; }
+.popup-select-btn { width:100%; margin-top:10px; padding:7px 0;
+  background:#E8540A; border:none; border-radius:5px;
+  color:#fff; font-size:12px; font-weight:600; cursor:pointer;
+  font-family:'Inter',sans-serif; transition:background .15s; }
+.popup-select-btn:hover { background:#c7440a; }
+
+::-webkit-scrollbar { width:5px; }
+::-webkit-scrollbar-track { background:#0d1117; }
+::-webkit-scrollbar-thumb { background:#30363d; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p id="loading-msg">Carregando rede de transmissão…</p>
+</div>
+
+<div id="app" style="display:none">
+  <!-- Header -->
+  <header>
+    <div>
+      <div class="header-title">⚡ Rede de Transmissão — ISA ENERGIA DO BRASIL</div>
+      <div class="header-sub">ANÁLISE CLIMÁTICA CMIP6 &nbsp;·&nbsp; ENSEMBLE DIÁRIO</div>
+    </div>
+    <div id="lt-counter" class="header-badge">— LTs visíveis</div>
+  </header>
+
+  <div class="body-wrap">
+    <!-- Sidebar -->
+    <div id="sidebar">
+
+      <!-- KPIs -->
+      <div class="panel-section">
+        <div class="kpi-grid">
+          <div class="kpi-box">
+            <div class="kpi-val" id="kpi-visible">—</div>
+            <div class="kpi-lbl">LTs visíveis</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-val" id="kpi-total">—</div>
+            <div class="kpi-lbl">LTs total</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Voltage legend -->
+      <div class="panel-section">
+        <div class="panel-title">Tensão (kV)</div>
+        <div id="legend-tensao"></div>
+      </div>
+
+      <!-- Filters -->
+      <div class="panel-section">
+        <div class="panel-title">Filtros</div>
+        <div class="filter-group">
+          <label class="filter-label">Empresa</label>
+          <select id="filter-empresa"><option value="">Todas</option></select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Tensão</label>
+          <select id="filter-tensao"><option value="">Todas</option></select>
+        </div>
+        <div class="filter-group" style="margin-bottom:0">
+          <label class="filter-label">Regional</label>
+          <select id="filter-regional"><option value="">Todas</option></select>
+        </div>
+      </div>
+
+      <!-- Search -->
+      <div class="panel-section">
+        <div class="panel-title">Buscar linha</div>
+        <input class="search-box" id="search-input" type="text"
+          placeholder="Digite nome ou trecho…" autocomplete="off">
+        <div class="search-results" id="search-results"></div>
+      </div>
+
+      <!-- Map layers -->
+      <div class="panel-section">
+        <div class="panel-title">Camadas</div>
+        <div class="filter-group">
+          <label class="filter-label">Mapa base</label>
+          <select id="base-layer-select">
+            <option value="dark">Dark (CartoDB)</option>
+            <option value="osm">OpenStreetMap</option>
+            <option value="satellite">Satélite (Esri)</option>
+            <option value="topo">Topográfico</option>
+          </select>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Fronteiras dos estados</span>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-states" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Variable selector -->
+      <div class="panel-section">
+        <div class="panel-title">Variável climática</div>
+        <div class="var-grid" id="var-pills"></div>
+      </div>
+
+      <!-- Selected line info -->
+      <div class="panel-section" id="line-card">
+        <div class="panel-title">Linha selecionada</div>
+        <div class="card-title" id="card-linha">—</div>
+        <div class="card-row">
+          <span class="card-key">Empresa</span>
+          <span class="card-val" id="card-empresa">—</span>
+        </div>
+        <div class="card-row">
+          <span class="card-key">Tensão</span>
+          <span class="card-val" id="card-tensao">—</span>
+        </div>
+        <div class="card-row">
+          <span class="card-key">Regional</span>
+          <span class="card-val" id="card-regional">—</span>
+        </div>
+        <div>
+          <span class="card-cells" id="card-cells">— células da grade</span>
+        </div>
+      </div>
+
+    </div><!-- /sidebar -->
+
+    <!-- Main -->
+    <div id="main">
+      <div id="map-wrap">
+        <div id="map"></div>
+        <div id="analysis-loading">
+          <span id="loading-analysis-msg">Calculando ensemble…</span>
+        </div>
+      </div>
+
+      <!-- Analysis panel (slides up) -->
+      <div id="analysis-wrap">
+        <div id="analysis-header">
+          <div id="analysis-title">Pior caso ao longo da linha</div>
+          <div id="analysis-line-name">—</div>
+          <div id="analysis-var-label">—</div>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <label style="font-size:10px;color:#8b949e;font-family:'IBM Plex Mono',monospace">
+              Média móvel
+            </label>
+            <select id="window-select" style="background:#0d1117;border:1px solid #30363d;
+              border-radius:5px;color:#c9d1d9;padding:3px 7px;font-size:11px;
+              font-family:'IBM Plex Mono',monospace;cursor:pointer;outline:none">
+              <option value="30">1 mês</option>
+              <option value="90">3 meses</option>
+              <option value="180">6 meses</option>
+              <option value="365" selected>1 ano</option>
+              <option value="730">2 anos</option>
+            </select>
+            <button id="close-analysis" title="Fechar">✕</button>
+          </div>
+        </div>
+        <div id="charts-grid">
+          <div class="chart-cell">
+            <div class="chart-scenario-label" id="lbl-ssp1">SSP1-2.6 — Baixa emissão</div>
+            <div class="chart-box" id="chart-ssp1_2_6"></div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-scenario-label" id="lbl-ssp2">SSP2-4.5 — Emissão intermediária</div>
+            <div class="chart-box" id="chart-ssp2_4_5"></div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-scenario-label" id="lbl-ssp3">SSP3-7.0 — Alta emissão</div>
+            <div class="chart-box" id="chart-ssp3_7_0"></div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /main -->
+  </div><!-- /body-wrap -->
+</div><!-- /app -->
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────────
+const TENSAO_COLORS = {
+  "525": "#ff2d00", "500": "#ff5500", "440": "#ff8800",
+  "345": "#ffcc00", "230": "#66dd66", "138": "#44bbee",
+  "88":  "#bb88ff", "69":  "#aaaaaa", "":   "#555555",
+};
+const TENSAO_ORDER  = ["525","500","440","345","230","138","88","69",""];
+
+const PERIOD_COLORS = {
+  "2021-2040": "#4e9af1",
+  "2031-2050": "#f59e42",
+  "2041-2060": "#ef4444",
+};
+const PERIOD_DASH = {
+  "2021-2040": "solid",
+  "2031-2050": "dash",
+  "2041-2060": "dot",
+};
+
+const PLOTLY_DARK = {
+  paper_bgcolor: "#161b22",
+  plot_bgcolor:  "#161b22",
+  font: { color: "#c9d1d9", size: 10, family: "Inter, sans-serif" },
+  xaxis: { gridcolor: "#21262d", linecolor: "#30363d", zerolinecolor: "#30363d" },
+  yaxis: { gridcolor: "#21262d", linecolor: "#30363d", zerolinecolor: "#30363d" },
+  margin: { l: 44, r: 60, t: 12, b: 36 },
+  legend: { bgcolor: "rgba(0,0,0,0)", font: { size: 10 }, x: 0, y: 1 },
+  showlegend: true,
+  hovermode: "x unified",
+};
+
+// Blue → Red color scale (low = blue, high = red)
+const BLUE_RED = [
+  [0.0,  "#2c7bb6"],
+  [0.25, "#abd9e9"],
+  [0.5,  "#ffffbf"],
+  [0.75, "#fdae61"],
+  [1.0,  "#d7191c"],
+];
+
+// ── Color helpers ──────────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n>>16)&255, (n>>8)&255, n&255];
+}
+function lerpColor(a, b, t) {
+  const [r0,g0,b0] = hexToRgb(a), [r1,g1,b1] = hexToRgb(b);
+  return `rgb(${Math.round(r0+t*(r1-r0))},${Math.round(g0+t*(g1-g0))},${Math.round(b0+t*(b1-b0))})`;
+}
+function scaleColor(t, reverse=false) {
+  t = Math.max(0, Math.min(1, reverse ? 1-t : t));
+  let i = 0;
+  while (i < BLUE_RED.length-2 && t > BLUE_RED[i+1][0]) i++;
+  const [t0, c0] = BLUE_RED[i], [t1, c1] = BLUE_RED[i+1];
+  return lerpColor(c0, c1, (t - t0) / (t1 - t0));
+}
+function gridColor(val, vmin, vmax, reverseScale=false) {
+  if (val == null || vmin === vmax) return "rgba(100,100,100,0.5)";
+  return scaleColor((val - vmin) / (vmax - vmin), reverseScale);
+}
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let allLines = [];          // raw data from /api/lines
+let allPolylines = {};      // linha -> {pl, lt}
+let hiddenTensoes = new Set();
+let selectedLinha = null;
+let currentVar = null;
+let variables = [];
+let statesLayer = null;
+let gridLayers = [];        // Leaflet rectangle layers for grid overlay
+let selectedPolyline = null; // highlighted polyline
+let lastAnalysisData = null; // for re-rendering charts on window change
+
+// ── Map init ───────────────────────────────────────────────────────────────────
+const map = L.map("map", {
+  center: [-15.5, -47.5], zoom: 5,
+  zoomControl: true, preferCanvas: true,
+});
+
+const BASE_LAYERS = {
+  dark: L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    { attribution: "© OpenStreetMap © CARTO", maxZoom: 19 }),
+  osm:  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { attribution: "© OpenStreetMap", maxZoom: 19 }),
+  satellite: L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "© Esri", maxZoom: 19 }),
+  topo: L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    { attribution: "© OpenTopoMap", maxZoom: 17 }),
+};
+BASE_LAYERS.dark.addTo(map);
+
+document.getElementById("base-layer-select").addEventListener("change", e => {
+  Object.values(BASE_LAYERS).forEach(l => map.removeLayer(l));
+  BASE_LAYERS[e.target.value].addTo(map);
+  if (statesLayer) statesLayer.bringToFront();
+  Object.values(allPolylines).forEach(({pl}) => pl.bringToFront());
+  gridLayers.forEach(l => l.bringToFront());
+  if (selectedPolyline) selectedPolyline.bringToFront();
+});
+
+// States layer
+const STATES_URL = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson";
+fetch(STATES_URL).then(r => r.json()).then(geo => {
+  statesLayer = L.geoJSON(geo, {
+    style: { color:"#7EC8E3", weight:1.5, opacity:.6,
+             fillColor:"#001f3f", fillOpacity:.12, dashArray:"4 3" },
+    onEachFeature: (feat, layer) => {
+      const sigla = feat.properties.sigla || feat.properties.uf || "";
+      if (sigla) {
+        const c = layer.getBounds().getCenter();
+        L.marker(c, {
+          icon: L.divIcon({ className:"", iconAnchor:[12,8],
+            html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:11px;
+              font-weight:700;color:rgba(255,255,255,.45);
+              text-shadow:0 1px 3px rgba(0,0,0,.8);
+              white-space:nowrap;pointer-events:none">${sigla}</div>` }),
+          interactive: false,
+        }).addTo(map);
+      }
+    },
+  }).addTo(map);
+  Object.values(allPolylines).forEach(({pl}) => pl.bringToFront());
+}).catch(() => {});
+
+document.getElementById("toggle-states").addEventListener("change", e => {
+  if (e.target.checked) { if (statesLayer) statesLayer.addTo(map); }
+  else                  { if (statesLayer) map.removeLayer(statesLayer); }
+});
+
+// ── Render lines ───────────────────────────────────────────────────────────────
+function renderLines(lines) {
+  lines.forEach(lt => {
+    const color  = TENSAO_COLORS[lt.tensao] || "#555";
+    const weight = {525:3,500:3,440:2.5,345:2.5,230:2,138:1.5,88:1.5,69:1}[lt.tensao] || 1;
+
+    const pl = L.polyline(lt.coords, { color, weight, opacity:.22 });
+
+    pl.bindPopup(`
+      <div class="popup-title">${lt.linha}</div>
+      <div class="popup-row">
+        <span class="popup-key">Tensão</span>
+        <span class="popup-val">${lt.tensao ? lt.tensao+' kV' : '—'}</span>
+      </div>
+      <div class="popup-row">
+        <span class="popup-key">Empresa</span>
+        <span class="popup-val">${lt.empresa || '—'}</span>
+      </div>
+      <div class="popup-row">
+        <span class="popup-key">Regional</span>
+        <span class="popup-val">${lt.regional || '—'}</span>
+      </div>
+      <button class="popup-select-btn" onclick="selectLineByName(${JSON.stringify(lt.linha)})">
+        ⚡ Analisar esta linha
+      </button>
+    `, { maxWidth: 280 });
+
+    pl.addTo(map);
+    allPolylines[lt.linha] = { pl, lt };
+  });
+}
+
+// ── Voltage legend ─────────────────────────────────────────────────────────────
+function buildLegend(lines) {
+  const counts = {};
+  lines.forEach(lt => counts[lt.tensao] = (counts[lt.tensao]||0)+1);
+  const div = document.getElementById("legend-tensao");
+  TENSAO_ORDER.forEach(t => {
+    if (!counts[t]) return;
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    item.dataset.t  = t;
+    item.innerHTML  = `
+      <div class="legend-swatch" style="background:${TENSAO_COLORS[t]}"></div>
+      <span class="legend-text">${t ? t+' kV' : 'N/D'}</span>
+      <span class="legend-count">${counts[t]}</span>`;
+    item.addEventListener("click", () => {
+      if (hiddenTensoes.has(t)) {
+        hiddenTensoes.delete(t); item.classList.remove("hidden");
+        Object.values(allPolylines).filter(({lt})=>lt.tensao===t)
+          .forEach(({pl})=> pl.addTo(map));
+      } else {
+        hiddenTensoes.add(t); item.classList.add("hidden");
+        Object.values(allPolylines).filter(({lt})=>lt.tensao===t)
+          .forEach(({pl})=> map.removeLayer(pl));
+      }
+      updateCounter();
+    });
+    div.appendChild(item);
+  });
+}
+
+function updateCounter() {
+  const vis = Object.values(allPolylines).filter(({pl}) => map.hasLayer(pl)).length;
+  document.getElementById("kpi-visible").textContent = vis;
+  document.getElementById("lt-counter").textContent  = vis + " LTs visíveis";
+}
+
+// ── Filters ────────────────────────────────────────────────────────────────────
+function buildFilters(lines) {
+  const empSel = document.getElementById("filter-empresa");
+  const tenSel = document.getElementById("filter-tensao");
+  const regSel = document.getElementById("filter-regional");
+
+  [...new Set(lines.map(l=>l.empresa).filter(Boolean))].sort()
+    .forEach(e => { const o=document.createElement("option"); o.value=o.textContent=e; empSel.appendChild(o); });
+
+  [...new Set(lines.map(l=>l.tensao).filter(Boolean))].sort((a,b)=>+a-+b)
+    .forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t+' kV'; tenSel.appendChild(o); });
+
+  [...new Set(lines.map(l=>l.regional).filter(Boolean))].sort()
+    .forEach(r => { const o=document.createElement("option"); o.value=o.textContent=r; regSel.appendChild(o); });
+
+  [empSel, tenSel, regSel].forEach(s => s.addEventListener("change", applyFilters));
+}
+
+function applyFilters() {
+  const emp = document.getElementById("filter-empresa").value;
+  const ten = document.getElementById("filter-tensao").value;
+  const reg = document.getElementById("filter-regional").value;
+
+  Object.entries(allPolylines).forEach(([, {pl, lt}]) => {
+    const ok = (!emp || lt.empresa===emp)
+             && (!ten || lt.tensao===ten)
+             && (!reg || lt.regional===reg)
+             && !hiddenTensoes.has(lt.tensao);
+    ok ? pl.addTo(map) : map.removeLayer(pl);
+  });
+  updateCounter();
+}
+
+// ── Search ─────────────────────────────────────────────────────────────────────
+const searchInput   = document.getElementById("search-input");
+const searchResults = document.getElementById("search-results");
+
+searchInput.addEventListener("input", () => {
+  const q = searchInput.value.trim().toLowerCase();
+  searchResults.innerHTML = "";
+  if (q.length < 2) return;
+  allLines.filter(lt => lt.linha.toLowerCase().includes(q)).slice(0,12)
+    .forEach(lt => {
+      const div = document.createElement("div");
+      div.className   = "search-result-item";
+      div.textContent = lt.linha;
+      div.title = lt.linha;
+      div.addEventListener("click", () => {
+        searchResults.innerHTML = "";
+        searchInput.value = lt.linha;
+        selectLineByName(lt.linha);
+      });
+      searchResults.appendChild(div);
+    });
+});
+
+// ── Variable pills ─────────────────────────────────────────────────────────────
+function buildVarPills(vars) {
+  variables = vars;
+  const container = document.getElementById("var-pills");
+  vars.forEach((v, i) => {
+    const btn = document.createElement("button");
+    btn.className = "var-pill" + (i===0 ? " active" : "");
+    btn.dataset.var  = v.id;
+    btn.textContent  = v.label.split(" ")[0];  // first word for brevity
+    btn.title = v.label;
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".var-pill").forEach(b=>b.classList.remove("active"));
+      btn.classList.add("active");
+      currentVar = v.id;
+      if (selectedLinha) fetchAnalysis(selectedLinha, currentVar);
+    });
+    container.appendChild(btn);
+  });
+  if (vars.length) currentVar = vars[0].id;
+}
+
+// ── Line selection ─────────────────────────────────────────────────────────────
+function selectLineByName(linha) {
+  const entry = allPolylines[linha];
+  if (!entry) return;
+
+  const { pl, lt } = entry;
+
+  // Restore previous selection style
+  if (selectedPolyline && selectedPolyline !== pl) {
+    const prev = allPolylines[selectedLinha];
+    if (prev) {
+      prev.pl.setStyle({
+        color: TENSAO_COLORS[prev.lt.tensao] || "#555",
+        weight: {525:3,500:3,440:2.5,345:2.5,230:2,138:1.5,88:1.5,69:1}[prev.lt.tensao] || 1,
+        opacity: .85,
+      });
+    }
+  }
+
+  selectedLinha = linha;
+  selectedPolyline = pl;
+
+  // Highlight selected line
+  pl.setStyle({ color: "#FFD700", weight: 5, opacity: 1 });
+  pl.bringToFront();
+  map.fitBounds(pl.getBounds(), { padding: [60, 60] });
+
+  // Update sidebar card
+  document.getElementById("line-card").style.display = "";
+  document.getElementById("card-linha").textContent   = lt.linha;
+  document.getElementById("card-empresa").textContent = lt.empresa || "—";
+  document.getElementById("card-tensao").textContent  = lt.tensao ? lt.tensao+" kV" : "—";
+  document.getElementById("card-regional").textContent = lt.regional || "—";
+  document.getElementById("card-cells").textContent   = "calculando…";
+
+  if (currentVar) fetchAnalysis(linha, currentVar);
+}
+
+// ── Fetch analysis ─────────────────────────────────────────────────────────────
+async function fetchAnalysis(linha, variable) {
+  // Show loading overlay
+  const overlay = document.getElementById("analysis-loading");
+  overlay.style.display = "flex";
+
+  // Clear old grid
+  gridLayers.forEach(l => map.removeLayer(l));
+  gridLayers = [];
+
+  try {
+    const params = new URLSearchParams({ linha, variable });
+    const res    = await fetch("/api/analysis?" + params);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || res.statusText);
+    }
+    const data = await res.json();
+
+    // Update cell count in sidebar
+    document.getElementById("card-cells").textContent = data.grid.length + " célula(s) da grade";
+
+    // Draw grid overlay
+    drawGrid(data);
+
+    // Open analysis panel
+    lastAnalysisData = data;
+    openAnalysisPanel(data);
+
+  } catch (e) {
+    document.getElementById("card-cells").textContent = "Erro: " + e.message;
+    console.error(e);
+  } finally {
+    overlay.style.display = "none";
+  }
+}
+
+// ── Grid overlay ───────────────────────────────────────────────────────────────
+function drawGrid(data) {
+  const vals = data.grid.map(c => c.value).filter(v => v != null);
+  if (!vals.length) return;
+  const vmin = Math.min(...vals), vmax = Math.max(...vals);
+  const reverseScale = (data.agg === "min");
+
+  data.grid.forEach(cell => {
+    if (cell.value == null) return;
+    const color = gridColor(cell.value, vmin, vmax, reverseScale);
+
+    const rect = L.rectangle(cell.bounds, {
+      color:       color,
+      weight:      1,
+      fillColor:   color,
+      fillOpacity: 0.55,
+      opacity:     0.8,
+    });
+
+    const fmt = v => v != null ? v.toPrecision(4) : "—";
+    rect.bindTooltip(
+      `<b>${data.var_label}</b><br>` +
+      `Pior caso: <b>${fmt(cell.value)}</b><br>` +
+      `Lat ${cell.lat.toFixed(1)}, Lon ${cell.lon.toFixed(1)}`,
+      { sticky: true, className: "leaflet-tooltip" }
+    );
+    rect.addTo(map);
+    gridLayers.push(rect);
+  });
+
+  // Keep the selected line on top of grid
+  if (selectedPolyline) selectedPolyline.bringToFront();
+
+  // Add colorbar as a Leaflet control
+  addColorbar(vmin, vmax, data.var_label, reverseScale);
+}
+
+// Simple colorbar control
+let colorbarControl = null;
+function addColorbar(vmin, vmax, label, reverse) {
+  if (colorbarControl) map.removeControl(colorbarControl);
+  colorbarControl = L.control({ position: "bottomright" });
+  colorbarControl.onAdd = () => {
+    const div = L.DomUtil.create("div");
+    const steps = 8;
+    let gradient = "";
+    for (let i=0; i<=steps; i++) {
+      const t  = i/steps;
+      const c  = scaleColor(t, reverse);
+      gradient += (i? "," : "") + c + " " + (t*100).toFixed(0)+"%";
+    }
+    const fmt = n => Math.abs(n) > 1e4 ? n.toExponential(2) : n.toPrecision(3);
+    div.innerHTML = `
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;
+        padding:8px 10px;min-width:130px;font-family:'IBM Plex Mono',monospace;">
+        <div style="font-size:9px;color:#8b949e;margin-bottom:4px;
+          text-overflow:ellipsis;overflow:hidden;white-space:nowrap;max-width:120px">
+          ${label}
+        </div>
+        <div style="height:10px;border-radius:3px;
+          background:linear-gradient(to right,${gradient});margin-bottom:3px"></div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#8b949e">
+          <span>${fmt(vmin)}</span><span>${fmt(vmax)}</span>
+        </div>
+      </div>`;
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  };
+  colorbarControl.addTo(map);
+}
+
+// ── Analysis panel ─────────────────────────────────────────────────────────────
+function openAnalysisPanel(data) {
+  const wrap = document.getElementById("analysis-wrap");
+  wrap.classList.add("open");
+
+  document.getElementById("analysis-line-name").textContent = data.linha;
+  document.getElementById("analysis-var-label").textContent = data.var_label;
+
+  // Wait for the CSS height transition (350ms) to finish before Plotly measures the container
+  const SCENARIO_ORDER = ["ssp1_2_6", "ssp2_4_5", "ssp3_7_0"];
+  setTimeout(() => {
+    SCENARIO_ORDER.forEach(sc => {
+      const el = document.getElementById("chart-" + sc);
+      if (!el) return;
+      const scData = data.scenarios[sc];
+      if (!scData) { if (typeof Plotly !== "undefined") Plotly.purge(el); return; }
+      renderChart(el, sc, scData, data.var_label);
+    });
+  }, 380);
+}
+
+// ── Rolling mean (O(n) prefix-sum, centered window) ───────────────────────────
+function rollingMean(values, window) {
+  const n = values.length;
+  const half = Math.floor(window / 2);
+  const minPts = Math.min(30, Math.ceil(window * 0.1));
+
+  // Build prefix sums treating null/NaN as 0 contribution
+  const pSum   = new Float64Array(n + 1);
+  const pCount = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    const v = values[i];
+    const valid = (v != null && isFinite(v));
+    pSum[i + 1]   = pSum[i]   + (valid ? v : 0);
+    pCount[i + 1] = pCount[i] + (valid ? 1 : 0);
+  }
+
+  const result = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - half);
+    const hi = Math.min(n, i + half + 1);
+    const count = pCount[hi] - pCount[lo];
+    if (count >= minPts) result[i] = (pSum[hi] - pSum[lo]) / count;
+  }
+  return result;
+}
+
+function renderChart(el, scenario, scData, varLabel) {
+  const periods = Object.keys(scData.periods).sort();
+  const q = scData.quantiles || {};
+  const windowDays = parseInt(document.getElementById("window-select").value, 10);
+
+  const traces = [];
+  periods.forEach(dr => {
+    const color  = PERIOD_COLORS[dr] || "#aaa";
+    const times  = scData.periods[dr].times;
+    const values = scData.periods[dr].values;
+    const rm     = rollingMean(values, windowDays);
+
+    // Raw data — thin, transparent, no legend entry
+    traces.push({
+      x: times, y: values,
+      type: "scatter", mode: "lines",
+      showlegend: false,
+      line: { color, width: 0.6 },
+      opacity: 0.2,
+      hoverinfo: "skip",
+    });
+
+    // Rolling mean — solid, labelled
+    traces.push({
+      x: times, y: rm,
+      type: "scatter", mode: "lines",
+      name: dr,
+      line: { color, width: 2, dash: PERIOD_DASH[dr] || "solid" },
+      hovertemplate: "%{x}: %{y:.4g}<extra>" + dr + " (média móvel)</extra>",
+    });
+  });
+
+  // Quantile reference lines + right-side annotations
+  const shapes = [], annotations = [];
+  const quantileDefs = [
+    { key:"q50", color:"#6b7280", dash:"dot",      label:"Q50", width:1.0 },
+    { key:"q90", color:"#f59e42", dash:"dash",     label:"Q90", width:1.5 },
+    { key:"q95", color:"#f97316", dash:"dashdot",  label:"Q95", width:1.5 },
+    { key:"q99", color:"#ef4444", dash:"longdash", label:"Q99", width:2.0 },
+  ];
+  quantileDefs.forEach(({ key, color, dash, label, width }) => {
+    if (q[key] == null) return;
+    shapes.push({
+      type:"line", x0:0, x1:1, xref:"paper",
+      y0:q[key], y1:q[key], line:{ color, dash, width },
+    });
+    annotations.push({
+      x:1.01, xref:"paper", xanchor:"left",
+      y:q[key], yref:"y",
+      text:`${label}: ${q[key].toPrecision(4)}`,
+      showarrow:false,
+      font:{ color, size:9, family:"IBM Plex Mono,monospace" },
+    });
+  });
+
+  const layout = Object.assign({}, PLOTLY_DARK, {
+    shapes, annotations,
+    xaxis: Object.assign({}, PLOTLY_DARK.xaxis, { tickfont:{ size:9 } }),
+    yaxis: Object.assign({}, PLOTLY_DARK.yaxis, {
+      title:{ text:varLabel, font:{ size:9 }, standoff:4 },
+      tickfont:{ size:9 },
+    }),
+    legend: { bgcolor:"rgba(0,0,0,0)", font:{ size:9 }, x:0, y:1,
+              orientation:"h", xanchor:"left" },
+  });
+
+  // Compute explicit height: 42vh panel minus header (~50px) and padding (~20px)
+  const chartH = Math.max(180, Math.floor(window.innerHeight * 0.42) - 70);
+  el.style.height = chartH + "px";
+  layout.height = chartH;
+
+  Plotly.react(el, traces, layout, { responsive:true, displayModeBar:false, displaylogo:false });
+}
+
+document.getElementById("close-analysis").addEventListener("click", () => {
+  document.getElementById("analysis-wrap").classList.remove("open");
+});
+
+// ── Bootstrap ──────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    document.getElementById("loading-msg").textContent = "Carregando linhas de transmissão…";
+    const [linesRes, varsRes] = await Promise.all([
+      fetch("/api/lines"),
+      fetch("/api/variables"),
+    ]);
+    allLines = await linesRes.json();
+    const vars = await varsRes.json();
+
+    document.getElementById("kpi-total").textContent = allLines.length;
+
+    renderLines(allLines);
+    buildLegend(allLines);
+    buildFilters(allLines);
+    buildVarPills(vars);
+    updateCounter();
+
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("app").style.display = "flex";
+    document.getElementById("app").style.flexDirection = "column";
+    document.getElementById("app").style.height = "100vh";
+    // Leaflet needs a tick after the container becomes visible to measure size
+    setTimeout(() => map.invalidateSize(), 50);
+
+  } catch (err) {
+    document.getElementById("loading-msg").textContent = "Erro ao carregar: " + err.message;
+    console.error(err);
+  }
+}
+
+// Window selector — re-render charts without re-fetching
+document.getElementById("window-select").addEventListener("change", () => {
+  if (lastAnalysisData) openAnalysisPanel(lastAnalysisData);
+});
+
+// Expose to popup buttons
+window.selectLineByName = selectLineByName;
+
+init();
+</script>
+</body>
+</html>
